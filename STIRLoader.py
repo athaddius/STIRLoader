@@ -89,7 +89,7 @@ class STIRStereoClip():
     class for each pregenerated l/r, clip
     throws indexerror if no video
     pregenerated sequence with video clips"""
-    def __init__(self, leftseqpath):
+    def __init__(self, leftseqpath, max_minutes=0.2):
         #fail if not all
         rightseqpath, vidname, startname = rightnamefromleft(leftseqpath)
         print(leftseqpath)
@@ -103,7 +103,7 @@ class STIRStereoClip():
             assert len(vids_left) == 1, "vids_left is not one"
             assert len(vids_right) == 1, "vids_right is not one"
         self.leftvidname = vids_left[0]
-        filterlength(self.leftvidname.name, 60*10)
+        filterlength(self.leftvidname.name, 60*max_minutes)
         self.leftvidfolder = Path(*leftseqpath.parts[:-1])
         self.rightvidname = vids_right[0]
         self.rightvidfolder = Path(*rightseqpath.parts[:-1])
@@ -161,8 +161,8 @@ class STIRStereoClip():
         im_vis = self.extractfirstframe() # resized on extract
         im_vis = cv2.cvtColor(im_vis, cv2.COLOR_RGB2BGR)
         im_ir = cv2.cvtColor(self.getstarticg(), cv2.COLOR_RGB2BGR)
-        im_seg = cv2.resize(im_seg, (640, 512))
-        im_ir = cv2.resize(im_ir, (640, 512))
+        #im_seg = cv2.resize(im_seg, (640, 512))
+        #im_ir = cv2.resize(im_ir, (640, 512))
         ## grab bb from startseg and first frame
         return im_ir, im_seg, im_vis
 
@@ -204,18 +204,18 @@ class STIRStereoClip():
         im_vis = cv2.cvtColor(im_vis, cv2.COLOR_RGB2BGR)
 
         im_ir = cv2.cvtColor(self.getstarticg(), cv2.COLOR_RGB2BGR)
-        im_ir = cv2.resize(im_ir, (640, 512))
+        #im_ir = cv2.resize(im_ir, (640, 512))
         im_startseg_float = self.getstartseg()
         startcenters = self.getcentersfromseg(im_startseg_float)
         im_ir_withcircles = drawcenters(im_ir, startcenters)
         
         im_ir_end = cv2.cvtColor(self.getendicg(), cv2.COLOR_RGB2BGR)
-        im_ir_end = cv2.resize(im_ir_end, (640, 512))
+        #im_ir_end = cv2.resize(im_ir_end, (640, 512))
         im_endseg_float = self.getendseg()
         endcenters = self.getcentersfromseg(im_endseg_float)
         im_ir_end_withcircles = drawcenters(im_ir_end, endcenters)
         im_seg_float = cv2.cvtColor(im_startseg_float, cv2.COLOR_RGB2BGR)
-        im_seg_float = cv2.resize(im_seg_float, (640, 512))
+        #im_seg_float = cv2.resize(im_seg_float, (640, 512))
         
         ## grab bb from startseg and first frame
         return cv2.hconcat([im_ir_withcircles, im_ir_end_withcircles])
@@ -387,8 +387,8 @@ class STIRStereoClip():
         im_vis = cv2.cvtColor(im_vis, cv2.COLOR_RGB2BGR)
         im_ir = cv2.cvtColor(self.getstarticg(), cv2.COLOR_RGB2BGR)
         im_seg_float = cv2.cvtColor(im_seg_float, cv2.COLOR_RGB2BGR)
-        im_seg_float = cv2.resize(im_seg_float, (640, 512))
-        im_ir = cv2.resize(im_ir, (640, 512))
+        #im_seg_float = cv2.resize(im_seg_float, (640, 512))
+        #im_ir = cv2.resize(im_ir, (640, 512))
         ## grab bb from startseg and first frame
         im_ir = cropbounds(im_ir, x, y, w, h)
         im_seg_float = cropbounds(im_seg_float, x, y, w, h)
@@ -427,8 +427,8 @@ class STIRStereoClip():
         im_vis = cv2.cvtColor(im_vis, cv2.COLOR_RGB2BGR)
         im_ir = cv2.cvtColor(self.getstarticg(), cv2.COLOR_RGB2BGR)
         im_seg_float = cv2.cvtColor(im_seg_float, cv2.COLOR_RGB2BGR)
-        im_seg_float = cv2.resize(im_seg_float, (640, 512))
-        im_ir = cv2.resize(im_ir, (640, 512))
+        #im_seg_float = cv2.resize(im_seg_float, (640, 512))
+        #im_ir = cv2.resize(im_ir, (640, 512))
         ## grab bb from startseg and first frame
         im_ir = cropbounds(im_ir, x, y, w, h)
         im_seg_float = cropbounds(im_seg_float, x, y, w, h)
@@ -441,8 +441,8 @@ class STIRStereoClip():
         allframesleft, allframesright = self.extractallframes()
         #print(len(allframes))
         for frameleft, frameright in zip(allframesleft, allframesright):
-            assert frameleft.shape == (512, 640, 3)
-            assert frameright.shape == (512, 640, 3)
+            assert frameleft.shape == (1024, 1280, 3), "Frame size is not yet supported"
+            assert frameright.shape == (1024, 1280, 3), "Frame size is not yet supported"
             image = self.transform(frameleft)
             image_right = self.transform(frameright)
             im_ori = to_ori(image)
@@ -480,7 +480,7 @@ class STIRStereoClip():
     def extractallframes(self):
         """ extracts whole sequence into tmpdir, and then loads the frames. Overcomplicated"""
         def getframes(filename):
-            size = (640, 512)
+            size = (1280, 1024)
             usetmpdir = False
             if usetmpdir:
                 with tempfile.TemporaryDirectory() as tmpdirname:
@@ -488,7 +488,8 @@ class STIRStereoClip():
                     framenames = sorted(os.listdir(tmpdirname))
                     vidframes = []
                     for frame in framenames:
-                        frame = cv2.resize(loadimcv(os.path.join(str(tmpdirname),frame)), (640, 512))
+                        frame = loadimcv(os.path.join(str(tmpdirname),frame))
+                        #frame = cv2.resize(frame, (640, 512))
                         #cv2.imshow('test_cv', frame)
                         #cv2.waitKey(1)
                         vidframes.append(frame)
@@ -571,7 +572,8 @@ class STIRStereoClip():
                 framenames = sorted(os.listdir(tmpdirname))
                 vidframes = []
                 for frame in framenames:
-                    frame = cv2.resize(loadimcv(os.path.join(str(tmpdirname),frame)), (640, 512))
+                    frame = loadimcv(os.path.join(str(tmpdirname),frame))
+                    #frame = cv2.resize(frame, (640, 512))
                     vidframes.append(frame)
                 return vidframes
         leftvidframe = getframes(self.leftvidname)[0]
