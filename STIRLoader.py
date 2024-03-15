@@ -51,7 +51,7 @@ class DataSequenceFull(torch.utils.data.IterableDataset):
         self.dataset = dataset
 
     def __iter__(self):
-        return self.dataset.fullseq(withcal=False)
+        return self.dataset.fullseq(withcal=True)
 
 def getclips(datadir = '/data2/STIRDataset'):
     """ Gets full length sequences from segmented ground truth data
@@ -451,18 +451,17 @@ class STIRStereoClip():
             ims_right = [image_right]
             ims_ori = [im_ori]
             ims_ori_right = [im_ori_right]
-            xyzs = [image.new_zeros((1))]
             if withcal:
                 K = torch.tensor([self.K])
                 Q = torch.tensor([self.Q])
                 disparitypad = torch.tensor([np.float32(self.disparitypad)])
+                breakpoint()
 
                 out = {
                     "ims": ims,
                     "ims_right": ims_right,
                     "ims_ori": ims_ori,
                     "ims_ori_right": ims_ori_right,
-                    "xyzs": xyzs,
                     "Ks": K,
                     "Qs": Q,
                     "disparitypads": disparitypad
@@ -473,7 +472,6 @@ class STIRStereoClip():
                     "ims_right": ims_right,
                     "ims_ori": ims_ori,
                     "ims_ori_right": ims_ori_right,
-                    "xyzs": xyzs,
                 }
             yield out
 
