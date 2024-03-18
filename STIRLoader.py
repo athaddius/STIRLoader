@@ -1,12 +1,38 @@
 from pathlib import Path
 import cv2
 import numpy as np
+import json
 import torchvision.transforms as transforms
 import torch
 import logging
 import tempfile
 import subprocess as sp
 import os
+def getKfromcameramat(mat, scale=1.0):
+    """ since all images can be resized, we  have to adjust K accordingly
+    """
+    K = mat.astype(np.float32)
+    K[0,2] = K[0,2]/scale
+    K[1,2] = K[1,2]/scale
+    K[0,0] = K[0,0]/scale
+    K[1,1] = K[1,1]/scale
+    return K
+
+def getQ(baseline, K):
+    """ Gets q backprojection matrix from K matrix"""
+
+    Q = np.zeros((4,4), np.float32)
+    cx = K[0,2]
+    cy = K[1,2]
+    f = K[0,0]
+    Q[0,3] = -cx
+    Q[1,3] = -cy
+    Q[2,3] = f
+    Q[3,2] = -1.0 / baseline
+    Q[0,0] = 1.0
+    Q[1,1] = 1.0
+    return Q
+
 def getviddirs2d_STIR(datadir):
     """ grabs videos generated as clips from prepared STIR dataset"""
     datadir = Path(datadir)
@@ -94,6 +120,9 @@ class STIRStereoClip():
         rightseqpath, vidname, startname = rightnamefromleft(leftseqpath)
         print(leftseqpath)
         self.leftbasename = leftseqpath #seq01 file
+        self.seqbase = Path(*leftseqpath.parts[0:-2]) # cuts off /left/seq##
+        withcal = True
+        calibfile = Path(self.seqbase, 'calib.json')
         self.rightbasename = rightseqpath #seq01 file
         vids_left = sorted(list(self.leftbasename.glob('frames/*.mp4')))
         vids_right = sorted(list(self.rightbasename.glob('frames/*.mp4')))
@@ -116,6 +145,27 @@ class STIRStereoClip():
         self.basename = leftseqpath
         self.rightseqpath = rightseqpath
         self.vidfolder = Path(*self.basename.parts[:-1])
+        if withcal:
+
+            with open(calibfile, 'r') as f:
+                calib_dict = json.load(f)
+
+            self.leftcameramat = np.array(calib_dict['leftcameramat'])
+            self.rightcameramat = np.array(calib_dict['rightcameramat'])
+            self.leftdistortioncoeffs = np.array(calib_dict['leftdistortioncoeffs'])
+            self.rightdistortioncoeffs = np.array(calib_dict['rightdistortioncoeffs'])
+            self.translation = np.array(calib_dict['translation'])
+            self.rotation = np.array(calib_dict['rotation'])
+
+            self.scale=1.0
+            left_cx = self.leftcameramat[0][2]
+            right_cx = self.rightcameramat[0][2]
+            self.disparitypad = (right_cx - left_cx)/self.scale
+            assert np.all(self.rightdistortioncoeffs == 0), "Need to add distortion math"
+            self.baseline_mm = self.translation[0] * 1000.
+            self.K = getKfromcameramat(self.leftcameramat, self.scale)
+
+            self.Q = getQ(self.baseline_mm, self.K)
 
     def getstartseg(self, left=True):
         """ Returns segmentation image of start frame"""
@@ -195,9 +245,8 @@ class STIRStereoClip():
         """ Returns im_start and im_end with circles drawn on centers
         ir_im, seg_im, vis_im"""
         def drawcenters(im, centers):
-            scale = 2
             for pt in centers:
-                im = cv2.circle(im, (pt[0]//2, pt[1]//scale), 6, (0,0,255), 2)
+                im = cv2.circle(im, (pt[0], pt[1]), 6, (0,0,255), 2)
             return im
              
         im_vis = self.extractfirstframe() # resized on extract
@@ -254,19 +303,12 @@ class STIRStereoClip():
         for left_contour in contours:
             # show contour
             x, y, w, h = cv2.boundingRect(left_contour)
-            a=0
             cx1_unadjusted = x + w // 2
-            cx1 = cx1_unadjusted + 90.6
+            cx1 = cx1_unadjusted + self.disparitypad
             cy1 = y + h // 2
-            x = x - a
-            y = y - a
-            w = w + 2*a
-            h = h + 2*a
             #print(f'{h}, {w}, {x}, {y}')
             left_patch = im_seg_float[y:y+h, x:x+w,:]
             left_patch_ir = im_ir_left[y:y+h, x:x+w,:]
-            #cv2.imshow("allim", left_patch)
-            #cv2.imshow("allim_ir", cv2.cvtColor(left_patch_ir, cv2.COLOR_RGB2BGR))
             #print(f'{h}, {w}, {x}, {y}')
             otheropts = []
             otheropts_ir = [] # ir images of others
@@ -278,17 +320,17 @@ class STIRStereoClip():
                 cx2 = center[0]
                 cy2 = center[1]
                 disp = cx1 - cx2
-                if abs(cy2 - cy1) >10:
+                if abs(cy2 - cy1) >10: # if difference is too large vertically, don't use it
                     continue
-                if disp < 8 or disp > 105:
+                if disp < 8 or disp > 105: # likewise for disparities
                     continue
                 #disparitymask the pieces that are out of bounds
                 if cx2-w//2 <0:
                     continue
                 start = cx2-w//2
-                if start + w > 1280:
-                    continue
                 end = start + w
+                if end > 1280:
+                    continue
                 #print(f'{h}, {w}, {x}, {y}')
                 right_patch = im_seg_float_right[y:y+h, start:end,:]
                 right_patch_ir = im_ir_right[y:y+h, start:end,:]
@@ -309,21 +351,25 @@ class STIRStereoClip():
             #print(f'{center}')
             if len(ious) == 0:
                 continue
-            #cv2.imshow("centerother", cv2.hconcat(otheropts))
-            #cv2.imshow("centerother_ir", cv2.cvtColor(cv2.hconcat(otheropts_ir), cv2.COLOR_RGB2BGR))
             #print([o.shape for o in otheropts])
             iou_ims = [np.ones((h, w, 3)) * iou for iou in ious]
-            #cv2.imshow("centerscores", cv2.hconcat(iou_ims))
 
             ncc_ims = [np.ones((h, w, 3)) * x for x in nccs]
-            #cv2.imshow("centerscores_ncc", cv2.hconcat(ncc_ims))
+            showpatchmatches = False
+            if showpatchmatches:
+                cv2.imshow("allim", left_patch)
+                cv2.imshow("allim_ir", cv2.cvtColor(left_patch_ir, cv2.COLOR_RGB2BGR))
+                cv2.imshow("centerother", cv2.hconcat(otheropts))
+                cv2.imshow("centerother_ir", cv2.cvtColor(cv2.hconcat(otheropts_ir), cv2.COLOR_RGB2BGR))
+                cv2.imshow("centerscores", cv2.hconcat(iou_ims))
+                cv2.imshow("centerscores_ncc", cv2.hconcat(ncc_ims))
+                cv2.waitKey()
 
             metrics = nccs
             ind = np.argmin(metrics)
             disp = disps[ind]
 
             # get max disp
-            #cv2.waitKey()
             #print(f'{disp}: disparity found')
             centerpairs.append([cx1_unadjusted, cy1])
             centerpairsright.append([centers_matched[ind], cy1])
@@ -336,24 +382,27 @@ class STIRStereoClip():
             cv2.line(bothims, (x1, y1), (x2, y2), (0, 165/255.0, 1.0), thickness=2)
         if False:
             cv2.imshow("matches", bothims)
-            cv2.waitKey(1)
+            cv2.waitKey()
         return centerpairs, centerpairsright
 
-    def getstartsegs3D(self, start):
+    def get3DSegmentationPositions(self, start):
+        """ start : whether to get starting or ending positions"""
         ## FIXME --show 3d positions
         centerpairs, centerpairsright = np.array(self.getsegsstereo(start=start))
         unscaledK = getKfromcameramat(self.leftcameramat, 1.0)
         unscaleddisparity = self.disparitypad * self.scale
-        unscaledQ = Frame.getQ(self.baseline, unscaledK)
+        unscaledQ = getQ(self.baseline_mm, unscaledK)
         disppoints = np.stack((centerpairs[:,0],centerpairs[:,1],(centerpairs[:,0]+unscaleddisparity)-centerpairsright[:,0]), axis=-1) # npts 3
-        disp_homogeneous = np.pad(disppoints, ((0,0),(0, 1)),'constant', constant_values=1) # numpy pad
+        disp_homogeneous = np.pad(disppoints, ((0,0),(0, 1)),'constant', constant_values=1)
         disp_homogeneous = disp_homogeneous @ unscaledQ.T
         disp_xyz = disp_homogeneous[:,:3]/disp_homogeneous[:,3:4]
         #disp_homogeneous = disp_homogeneous @ unscaledQ.T
         #disp_xyz = disp_homogeneous[:,:2]#/disp_homogeneous[:,3:4]
 
         if False:
+            import matplotlib
             import matplotlib.pyplot as plt
+            matplotlib.use('TkAgg')
             fig = plt.figure()
             ax = fig.add_subplot(projection='3d')
 
@@ -455,7 +504,6 @@ class STIRStereoClip():
                 K = torch.tensor([self.K])
                 Q = torch.tensor([self.Q])
                 disparitypad = torch.tensor([np.float32(self.disparitypad)])
-                breakpoint()
 
                 out = {
                     "ims": ims,
