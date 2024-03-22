@@ -54,20 +54,20 @@ def getviddirs2d_STIR(datadir):
 
 
 def to_ori(x):
-    """ Converts from: a 0.0, 1.0 range tensor with shape [C, H, W]
-        to: a 0, 255 range integer tensor, with shape [H, W, C]"""
+    """Converts from: a 0.0, 1.0 range tensor with shape [C, H, W]
+    to: a 0, 255 range integer tensor, with shape [H, W, C]"""
     return (x.permute(1, 2, 0) * 255.0).byte()
 
 
 def loadimcv(framename):
-    """ Returns frame in floating point rgb [H, W, C]"""
+    """Returns frame in floating point rgb [H, W, C]"""
     frameim = cv2.imread(str(framename))
     frameim = cv2.cvtColor(frameim, cv2.COLOR_BGR2RGB)
     return (frameim / 255.0).astype(np.float32)
 
 
 def rightnamefromleft(seqleft):
-    """ Replaces name of right folder with left
+    """Replaces name of right folder with left
     Returns:
         rightseqpath: name for right vid
         vidname: name of left vid
@@ -98,7 +98,7 @@ def getclips(datadir="/data2/STIRDataset"):
 
     datasets = []
     for basename in seqlist:
-        try:  
+        try:
             datasequence = STIRStereoClip(basename)
             dataset = DataSequenceFull(datasequence)  # wraps in dataset
             datasets.append(dataset)
@@ -122,7 +122,7 @@ def filterlength(filename, numseconds):
 
 
 class STIRStereoClip:
-    """ Loader for clip sequences 
+    """Loader for clip sequences
     takes in h264 video
     throws indexerror if no video
     """
@@ -132,7 +132,7 @@ class STIRStereoClip:
         print(leftseqpath)
         self.leftbasename = leftseqpath  # seq01 file
         self.seqbase = Path(*leftseqpath.parts[0:-2])  # cuts off pieces /left/seq##
-        withcal = True # load calibration as well.
+        withcal = True  # load calibration as well.
         calibfile = Path(self.seqbase, "calib.json")
         self.rightbasename = rightseqpath  # seq01 file
         vids_left = sorted(list(self.leftbasename.glob("frames/*.mp4")))
@@ -153,9 +153,7 @@ class STIRStereoClip:
             ]
         )
 
-        logging.debug(
-                f"STIRStereoClip: {self.leftvidname},{self.rightvidname}"
-        )
+        logging.debug(f"STIRStereoClip: {self.leftvidname},{self.rightvidname}")
         self.basename = leftseqpath
         self.rightseqpath = rightseqpath
         self.vidfolder = Path(*self.basename.parts[:-1])
@@ -228,7 +226,8 @@ class STIRStereoClip:
 
     def gettriple(self):
         """Returns image triple
-        ir_im (from start of video), seg_im (from start of video), vis_im (RGB from from first frame)"""
+        ir_im (from start of video), seg_im (from start of video), vis_im (RGB from from first frame)
+        """
         im_seg = (cv2.cvtColor(self.getstartseg(), cv2.COLOR_BGR2GRAY) * 255.0).astype(
             np.uint8
         )
@@ -252,8 +251,8 @@ class STIRStereoClip:
 
         if len(contours) == 0:
             raise IndexError(f"No contours were found in in image")
-        centers = [] # set of bounding rectangle centers
-        for contour in contours: 
+        centers = []  # set of bounding rectangle centers
+        for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             xcent = x + w // 2
             ycent = y + h // 2
@@ -261,7 +260,7 @@ class STIRStereoClip:
         return centers
 
     def getstartcenters(self, left=True):
-        """ Returns list of center points for the starting frame
+        """Returns list of center points for the starting frame
         left: whether to get segmentation for left frame (True: left, False: right)
         Returns:
             centers: [[x, y], [x2, y2], ..., [xn, yn]] list of centers"""
@@ -269,7 +268,7 @@ class STIRStereoClip:
         return self.getcentersfromseg(im_startseg_float)
 
     def getendcenters(self, left=True):
-        """ Returns list of center points for the ending frame
+        """Returns list of center points for the ending frame
         left: whether to get segmentation for left frame (True: left, False: right)
         Returns:
             centers: [[x, y], [x2, y2], ..., [xn, yn]] list of centers"""
@@ -304,7 +303,7 @@ class STIRStereoClip:
         # return cv2.hconcat([im_vis, im_seg_float, im_ir_withcircles, im_ir_end_withcircles])
 
     def cross_correlation(self, patch1, patch2):
-        """ Calculates zero-mean ncc between two patches """
+        """Calculates zero-mean ncc between two patches"""
         product = np.mean((patch1 - patch1.mean()) * (patch2 - patch2.mean()))
         stds = patch1.std() * patch2.std()
         if stds == 0:
@@ -596,7 +595,7 @@ class STIRStereoClip:
             yield out
 
     def extractallframes(self):
-        """Extracts whole sequence into 
+        """Extracts whole sequence into
         If SKIP is set in os.environ, this skips every SKIP frames
 
         usetmpdir:
@@ -606,7 +605,7 @@ class STIRStereoClip:
         def getframes(filename):
             size = (1280, 1024)
             usetmpdir = False
-            if usetmpdir: # complicated .
+            if usetmpdir:  # complicated .
                 with tempfile.TemporaryDirectory() as tmpdirname:
                     self.extractfullvideo(filename, tmpdirname, "visible")
                     framenames = sorted(os.listdir(tmpdirname))
