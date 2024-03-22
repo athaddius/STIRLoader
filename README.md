@@ -6,6 +6,12 @@ Dataset: https://dx.doi.org/10.21227/w8g4-g548
 
 
 ## Usage
+
+Use with [SITRMetrics](https://github.com/athaddius/STIRMetrics).
+Install (preferred in a virtual environment) with:
+```
+pip install .
+```
 Change datadir as desired to point to the extracted location of the STIR dataset.
 
 
