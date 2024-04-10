@@ -1,0 +1,16 @@
+[project]
+name = "STIRLoader"
+version = "0.0.1"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "torch",
+    "opencv-python",
+    "matplotlib",
+]
+                                                                                
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
