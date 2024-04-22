@@ -89,6 +89,21 @@ class DataSequenceFull(torch.utils.data.IterableDataset):
     def __iter__(self):
         return self.dataset.fullseq(withcal=True)
 
+def getfile(basename):
+    """Gets a single video"""
+
+
+    datasets = []
+    try:
+        datasequence = STIRStereoClip(Path(basename))
+        dataset = DataSequenceFull(datasequence)  # wraps in dataset
+        datasets.append(dataset)
+    except (AssertionError, IndexError) as e:
+        logging.debug(
+            f"error on {basename}: {e}, sometimes happens if depth not finished"
+        )
+        print(e)
+    return datasets
 
 def getclips(datadir="/data2/STIRDataset"):
     """Gets full length sequences from segmented ground truth data
@@ -110,14 +125,14 @@ def getclips(datadir="/data2/STIRDataset"):
     return datasets
 
 
-def filterlength(filename, numseconds):
+def filterlength(filename, numseconds, tofilter=False):
     """Throws indexerror if video length is over numseconds in length"""
     name = filename
     ms = name.split("ms-")
     starttime = int(ms[0])
     endtime = int(ms[1])
     duration = endtime - starttime
-    if duration / 1000.0 > numseconds:
+    if duration / 1000.0 > numseconds and tofilter:
         raise IndexError(f"video over {numseconds}s long, skipping")
 
 
@@ -250,7 +265,8 @@ class STIRStereoClip:
         )
 
         if len(contours) == 0:
-            raise IndexError(f"No contours were found in in image")
+            return []
+            #raise IndexError(f"No contours were found in in image")
         centers = []  # set of bounding rectangle centers
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
@@ -332,7 +348,8 @@ class STIRStereoClip:
             im_seg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
         )
         if len(contours) == 0:
-            raise IndexError(f"no contours in im")
+            pass
+            #raise IndexError(f"no contours in im")
 
         centers = self.getcentersfromseg(im_seg_float_right)
         centerpairs = []
