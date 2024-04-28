@@ -313,7 +313,32 @@ class STIRStereoClip:
             product /= stds
             return product
 
-    def getsegsstereo(self, start=True):
+    def compute_sub_pixel_disparity_offset(self, prev_score, center_score, next_score):
+        """Fits a parabolic function to disparity on the vicinity of center.
+        If the center is at a bound (if prev_score or next_score is `None`) a fraction of distance from the center to the other is used for refinement.
+        Returns the sub-pixel disparity offset."""
+        eps = 1e-6
+        # Bounds
+        if prev_score is None:
+            return 0.5 * (center_score / (next_score + eps))
+        if next_score is None:
+            return -0.5 * (center_score / (prev_score + eps))
+
+        # Equality
+        left_diff = prev_score - center_score
+        right_diff = next_score - center_score
+        if left_diff == 0 and right_diff == 0:
+            return 0
+
+        x = right_diff / (left_diff + eps)
+        coeff = -1
+        if left_diff < right_diff:
+            x = left_diff / (right_diff + eps)
+            coeff = 1
+        
+        return coeff * ((x / (x + 1 + eps)) - 0.5)
+
+    def getsegsstereo(self, start=True, apply_sub_pixel_refinement=True):
         """From each left image, uses stereo to find ncc-closest patch along scanline for the right
         returns x, y, x2, y2 set of locations in images. y2=y"""
         if start:
@@ -352,6 +377,8 @@ class STIRStereoClip:
             otheropts_ir = []  # ir images of others
             ious = []
             nccs = []
+            prev_nccs = []
+            next_nccs = []
             disps = []
             centers_matched = []
             for center in centers:
@@ -390,6 +417,23 @@ class STIRStereoClip:
                 nccs.append(self.cross_correlation(left_patch_ir, right_patch_ir))
                 disps.append(disp)
                 centers_matched.append(cx2)
+
+                if apply_sub_pixel_refinement:
+                    vicinity_nccs = []
+                    for offset in [-1, 1]:
+                        start = cx2 - w // 2 + offset
+                        end = start + w
+                        if start < 0 or end > 1280:
+                            vicinity_nccs.append(None)
+                            continue
+                        vicinity_patch = im_seg_float_right[y : y + h, start:end, :]
+                        vicinity_nccs.append(
+                            self.cross_correlation(left_patch_ir, vicinity_patch)
+                        )
+                    prev_nccs.append(vicinity_nccs[0])
+                    next_nccs.append(vicinity_nccs[1])
+
+
             # print(f'{center}')
             if len(ious) == 0:
                 continue
@@ -414,6 +458,15 @@ class STIRStereoClip:
             ind = np.argmin(metrics)
             disp = disps[ind]
 
+            if apply_sub_pixel_refinement:
+                prev_ncc = prev_nccs[ind]
+                next_ncc = next_nccs[ind]
+                center_ncc = nccs[ind]
+                sub_pixel_offset = self.compute_sub_pixel_disparity_offset(
+                    prev_ncc, center_ncc, next_ncc
+                )
+                disp += sub_pixel_offset
+
             # get max disp
             # print(f'{disp}: disparity found')
             centerpairs.append([cx1_unadjusted, cy1])
@@ -432,10 +485,10 @@ class STIRStereoClip:
             cv2.waitKey()
         return centerpairs, centerpairsright
 
-    def get3DSegmentationPositions(self, start):
+    def get3DSegmentationPositions(self, start, apply_sub_pixel_refinement=True):
         """Gets positions of segmentation points in 3D by using getsegsstereo.
         start: whether to get starting or ending positions"""
-        centerpairs, centerpairsright = np.array(self.getsegsstereo(start=start))
+        centerpairs, centerpairsright = np.array(self.getsegsstereo(start=start, apply_sub_pixel_refinement=apply_sub_pixel_refinement))
         unscaledK = getKfromcameramat(self.leftcameramat, 1.0)
         unscaleddisparity = self.disparitypad * self.scale
         unscaledQ = getQ(self.baseline_mm, unscaledK)
