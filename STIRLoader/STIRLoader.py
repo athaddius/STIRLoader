@@ -572,8 +572,8 @@ class STIRStereoClip:
             ims_ori = [im_ori]
             ims_ori_right = [im_ori_right]
             if withcal:
-                K = torch.tensor([self.K])
-                Q = torch.tensor([self.Q])
+                K = torch.from_numpy(self.K).unsqueeze(0)
+                Q = torch.from_numpy(self.Q).unsqueeze(0)
                 disparitypad = torch.tensor([np.float32(self.disparitypad)])
 
                 out = {
