@@ -132,6 +132,7 @@ def filterlength(filename, numseconds, tofilter=False):
     starttime = int(ms[0])
     endtime = int(ms[1])
     duration = endtime - starttime
+    print(f"Video is {duration/1000.}s")
     if duration / 1000.0 > numseconds and tofilter:
         raise IndexError(f"video over {numseconds}s long, skipping")
 
@@ -144,7 +145,7 @@ class STIRStereoClip:
 
     def __init__(self, leftseqpath, max_minutes=0.2):
         rightseqpath, vidname, startname = rightnamefromleft(leftseqpath)
-        print(leftseqpath)
+        #print(f"Found clip: {Path(*leftseqpath.parts[-4:])}")
         self.leftbasename = leftseqpath  # seq01 file
         self.seqbase = Path(*leftseqpath.parts[0:-2])  # cuts off pieces /left/seq##
         withcal = True  # load calibration as well.
@@ -158,7 +159,9 @@ class STIRStereoClip:
             assert len(vids_left) == 1, "Number of left videos != 1"
             assert len(vids_right) == 1, "Number of right videos != 1"
         self.leftvidname = vids_left[0]
-        filterlength(self.leftvidname.name, 60 * max_minutes)
+        print(self.leftvidname)
+        max_minutes = 4.0
+        filterlength(self.leftvidname.name, 60 * max_minutes, True)
         self.leftvidfolder = Path(*leftseqpath.parts[:-1])
         self.rightvidname = vids_right[0]
         self.rightvidfolder = Path(*rightseqpath.parts[:-1])
@@ -195,6 +198,8 @@ class STIRStereoClip:
             self.K = getKfromcameramat(self.leftcameramat, self.scale)
 
             self.Q = getQ(self.baseline_mm, self.K)
+        #allframesleft, allframesright = self.extractallframes()
+        #print(len(allframesleft))
 
     def getstartseg(self, left=True):
         """Returns segmentation image of start frame,
@@ -572,7 +577,7 @@ class STIRStereoClip:
         """generator yields full sequence
         {ims, ims_right, ims_ori, ims_ori_right, xyzs, Ks, Qs, disparitypads}"""
         allframesleft, allframesright = self.extractallframes()
-        # print(len(allframes))
+        #print(len(allframesleft))
         for frameleft, frameright in zip(allframesleft, allframesright):
             assert frameleft.shape == (1024, 1280, 3), "Frame size is not yet supported"
             assert frameright.shape == (
