@@ -8,6 +8,8 @@ import logging
 import tempfile
 import subprocess as sp
 import os
+import threading
+from multiprocessing.pool import ThreadPool
 
 
 def getKfromcameramat(mat, scale=1.0):
@@ -79,6 +81,41 @@ def rightnamefromleft(seqleft):
     rightseqpath = Path(*startname, rightvid, seqname)
     return rightseqpath, vidname, startname
 
+def load_async_video(leftvidname, rightvidname, disparitypad, K, Q, transform, withcal):
+    iter_vid = STIRStereoClip.fullseq_static(leftvidname, rightvidname, disparitypad, K, Q, transform, withcal)
+    return list(iter_vid)
+
+class DataSequenceFull_List(torch.utils.data.Dataset):
+    """Generates full sequences, returning an list"""
+
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self.framelist_async = None
+        self.framelist_calculated = False
+
+    def queueload(self):
+        """ start loading the ffmpeg file"""
+        print("Starting video load pool")
+        self.pool = ThreadPool(processes=1)
+        withcal = True
+        args = (self.dataset.leftvidname, self.dataset.rightvidname, self.dataset.disparitypad, self.dataset.K, self.dataset.Q, self.dataset.transform, withcal)
+        self.framelist_async = self.pool.apply_async(load_async_video, (args))
+
+    def loadvideo(self):
+        if self.framelist_calculated == False:
+            print("Grabbing video from queue")
+            self.framelist = self.framelist_async.get()
+            self.framelist_calculated = True
+            self.pool.close()
+            print("Video grabbed")
+
+    def __len__(self):
+        self.loadvideo()
+        return len(self.framelist)
+
+    def __getitem__(self, idx):
+        self.loadvideo()
+        return self.framelist[idx]
 
 class DataSequenceFull(torch.utils.data.IterableDataset):
     """Generates full sequences, returning an iterable dataset"""
@@ -105,17 +142,22 @@ def getfile(basename):
         print(e)
     return datasets
 
-def getclips(datadir="/data2/STIRDataset"):
+def getclips(datadir="/data2/STIRDataset", iterloader=True, filterlong=False):
     """Gets full length sequences from segmented ground truth data
-    datadir: dataset directory for STIR dataset"""
+    datadir: dataset directory for STIR dataset
+    iterloader: whether to use an iterator for the dataloader"""
+
 
     seqlist = getviddirs2d_STIR(datadir)  # list of seq<##> folders
 
     datasets = []
     for basename in seqlist:
         try:
-            datasequence = STIRStereoClip(basename)
-            dataset = DataSequenceFull(datasequence)  # wraps in dataset
+            datasequence = STIRStereoClip(basename, filterlong=filterlong)
+            if iterloader:
+                dataset = DataSequenceFull(datasequence)
+            else:
+                dataset = DataSequenceFull_List(datasequence)
             datasets.append(dataset)
         except (AssertionError, IndexError) as e:
             logging.debug(
@@ -140,11 +182,11 @@ class STIRStereoClip:
     """Loader for clip sequences
     takes in h264 video
     throws indexerror if no video
+    loads color images
     """
 
-    def __init__(self, leftseqpath, max_minutes=0.2):
+    def __init__(self, leftseqpath, filterlong=False, max_minutes=2):
         rightseqpath, vidname, startname = rightnamefromleft(leftseqpath)
-        print(leftseqpath)
         self.leftbasename = leftseqpath  # seq01 file
         self.seqbase = Path(*leftseqpath.parts[0:-2])  # cuts off pieces /left/seq##
         withcal = True  # load calibration as well.
@@ -158,7 +200,8 @@ class STIRStereoClip:
             assert len(vids_left) == 1, "Number of left videos != 1"
             assert len(vids_right) == 1, "Number of right videos != 1"
         self.leftvidname = vids_left[0]
-        filterlength(self.leftvidname.name, 60 * max_minutes)
+        # only filters if filterlong is = True
+        filterlength(self.leftvidname.name, 60 * max_minutes, filterlong)
         self.leftvidfolder = Path(*leftseqpath.parts[:-1])
         self.rightvidname = vids_right[0]
         self.rightvidfolder = Path(*rightseqpath.parts[:-1])
@@ -330,7 +373,9 @@ class STIRStereoClip:
 
     def getsegsstereo(self, start=True):
         """From each left image, uses stereo to find ncc-closest patch along scanline for the right
-        returns x, y, x2, y2 set of locations in images. y2=y"""
+        returns x, y, x2, y2 set of locations in images. y2=y
+        centerpairsleft (x,y) set of locations
+        centerpairsright (x2,y2) set of locations in right image y2=y"""
         if start:
             im_seg_float = self.getstartseg(left=True)
             im_seg_float_right = self.getstartseg(left=False)
@@ -408,7 +453,7 @@ class STIRStereoClip:
                 centers_matched.append(cx2)
             # print(f'{center}')
             if len(ious) == 0:
-                continue
+                continue # doesn't append in this case
             # print([o.shape for o in otheropts])
             iou_ims = [np.ones((h, w, 3)) * iou for iou in ious]
 
@@ -428,10 +473,8 @@ class STIRStereoClip:
 
             metrics = nccs
             ind = np.argmin(metrics)
-            disp = disps[ind]
+            disp = disps[ind] # disparity
 
-            # get max disp
-            # print(f'{disp}: disparity found')
             centerpairs.append([cx1_unadjusted, cy1])
             centerpairsright.append([centers_matched[ind], cy1])
         bothims = cv2.cvtColor(
@@ -568,11 +611,19 @@ class STIRStereoClip:
         im_vis = cropbounds(im_vis, x, y, w, h)
         return cv2.hconcat([im_ir, im_vis, im_seg_float])
 
-    def fullseq(self, withcal=True):
-        """generator yields full sequence
+    def fullseq_list(self, withcal=True):
+        outs = list(self.fullseq(withcal))
+        return outs
+
+    @staticmethod
+    def fullseq_static(leftvidname, rightvidname, disparitypad, K, Q, transform, withcal=True):
+        """generator yields full sequence, static version
         {ims, ims_right, ims_ori, ims_ori_right, xyzs, Ks, Qs, disparitypads}"""
-        allframesleft, allframesright = self.extractallframes()
-        # print(len(allframes))
+        allframesleft, allframesright = STIRStereoClip.extractallframes(leftvidname, rightvidname)
+        if withcal:
+            K = torch.tensor([K])
+            Q = torch.tensor([Q])
+            disparitypad = torch.tensor([np.float32(disparitypad)])
         for frameleft, frameright in zip(allframesleft, allframesright):
             assert frameleft.shape == (1024, 1280, 3), "Frame size is not yet supported"
             assert frameright.shape == (
@@ -580,8 +631,8 @@ class STIRStereoClip:
                 1280,
                 3,
             ), "Frame size is not yet supported"
-            image = self.transform(frameleft)
-            image_right = self.transform(frameright)
+            image = transform(frameleft)
+            image_right = transform(frameright)
             im_ori = to_ori(image)
             im_ori_right = to_ori(image_right)
             ims = [image]
@@ -589,10 +640,6 @@ class STIRStereoClip:
             ims_ori = [im_ori]
             ims_ori_right = [im_ori_right]
             if withcal:
-                K = torch.from_numpy(self.K).unsqueeze(0)
-                Q = torch.from_numpy(self.Q).unsqueeze(0)
-                disparitypad = torch.tensor([np.float32(self.disparitypad)])
-
                 out = {
                     "ims": ims,
                     "ims_right": ims_right,
@@ -611,7 +658,33 @@ class STIRStereoClip:
                 }
             yield out
 
-    def extractallframes(self):
+    def fullseq(self, withcal=True):
+        """generator yields full sequence
+        {ims, ims_right, ims_ori, ims_ori_right, xyzs, Ks, Qs, disparitypads}"""
+        yield from STIRStereoClip.fullseq_static(self.leftvidname, self.rightvidname, self.disparitypad, self.K, self.Q, self.transform, withcal)
+
+    @staticmethod
+    def getframes(filename):
+        size = (1280, 1024)
+        usetmpdir = False
+        if usetmpdir:  # complicated .
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                STIRStereoClip.extractfullvideo(filename, tmpdirname, "visible")
+                framenames = sorted(os.listdir(tmpdirname))
+                vidframes = []
+                for frame in framenames:
+                    frame = loadimcv(os.path.join(str(tmpdirname), frame))
+                    # frame = cv2.resize(frame, (640, 512))
+                    # cv2.imshow('test_cv', frame)
+                    # cv2.waitKey(1)
+                    vidframes.append(frame)
+                return vidframes
+        else:
+            frames = STIRStereoClip.extractfullvideopipe(filename, "visible")
+            return [cv2.resize(x, size) for x in frames]
+
+    @staticmethod
+    def extractallframes(leftvidname, rightvidname):
         """Extracts whole sequence into
         If SKIP is set in os.environ, this skips every SKIP frames
 
@@ -619,27 +692,9 @@ class STIRStereoClip:
             True extracts using tmpdir, and then loads the frames afterwards.
             False extracts using extractfullvideopipe"""
 
-        def getframes(filename):
-            size = (1280, 1024)
-            usetmpdir = False
-            if usetmpdir:  # complicated .
-                with tempfile.TemporaryDirectory() as tmpdirname:
-                    self.extractfullvideo(filename, tmpdirname, "visible")
-                    framenames = sorted(os.listdir(tmpdirname))
-                    vidframes = []
-                    for frame in framenames:
-                        frame = loadimcv(os.path.join(str(tmpdirname), frame))
-                        # frame = cv2.resize(frame, (640, 512))
-                        # cv2.imshow('test_cv', frame)
-                        # cv2.waitKey(1)
-                        vidframes.append(frame)
-                    return vidframes
-            else:
-                frames = self.extractfullvideopipe(filename, "visible")
-                return [cv2.resize(x, size) for x in frames]
 
-        leftvidframes = getframes(self.leftvidname)
-        rightvidframes = getframes(self.rightvidname)
+        leftvidframes = STIRStereoClip.getframes(leftvidname)
+        rightvidframes = STIRStereoClip.getframes(rightvidname)
         if "SKIP" in os.environ:
             SKIP = int(os.environ["SKIP"])
             print(f"using different skip factor of {SKIP}")
@@ -686,7 +741,7 @@ class STIRStereoClip:
             "rawvideo",
             "-",
         ]
-        pipe = sp.Popen(command, stdout=sp.PIPE)
+        pipe = sp.Popen(command, stdout=sp.PIPE, bufsize=100000000)
         cnt = 0
         W = 1280
         H = 1024

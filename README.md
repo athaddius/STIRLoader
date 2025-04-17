@@ -1,17 +1,15 @@
 # STIRLoader
 STIRLoader is a dataloader for the STIR dataset
 
-Paper: https://arxiv.org/abs/2309.16782
-Dataset: https://dx.doi.org/10.21227/w8g4-g548
+The [Paper](https://arxiv.org/abs/2309.16782) describes the annotation procedure for the [Dataset](https://dx.doi.org/10.21227/w8g4-g548).
 
 
 ## Usage
 
 Use with [STIRMetrics](https://github.com/athaddius/STIRMetrics).
-Install (preferred in a virtual environment) with:
+Install this package in a virtual environment with:
 ```
 pip install .
 ```
-Change datadir as desired to point to the extracted location of the STIR dataset.
 
-
+Change the datadir argument when calling functions to point to the extracted location of the STIR dataset.
