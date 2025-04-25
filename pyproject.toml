@@ -6,7 +6,7 @@ requires-python = ">=3.8"
 dependencies = [
     "numpy",
     "torch",
-    "opencv-contrib-python==4.5.5.64",
+    "opencv-contrib-python=4.5.5.64",
     "matplotlib",
 ]
                                                                                 
