@@ -160,8 +160,8 @@ class STIRStereoClip:
             assert len(vids_right) == 1, "Number of right videos != 1"
         self.leftvidname = vids_left[0]
         print(self.leftvidname)
-        max_minutes = 4.0
-        filterlength(self.leftvidname.name, 60 * max_minutes, True)
+        filterlong=False
+        filterlength(self.leftvidname.name, 60 * max_minutes, filterlong)
         self.leftvidfolder = Path(*leftseqpath.parts[:-1])
         self.rightvidname = vids_right[0]
         self.rightvidfolder = Path(*rightseqpath.parts[:-1])

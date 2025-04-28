@@ -4,9 +4,9 @@ version = "0.0.1"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    "numpy",
+    "numpy==1.23.5",
     "torch",
-    "opencv-python",
+    "opencv-contrib-python==4.5.5.64",
     "matplotlib",
 ]
                                                                                 
