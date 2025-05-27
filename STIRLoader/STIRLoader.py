@@ -432,7 +432,7 @@ class STIRStereoClip:
                 cv2.waitKey()
 
             metrics = nccs
-            ind = np.argmin(metrics)
+            ind = np.argmax(metrics)
             disp = disps[ind]
 
             # get max disp
